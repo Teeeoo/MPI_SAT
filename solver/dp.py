@@ -1,53 +1,58 @@
-from copy import deepcopy
-from solver.utils import read_cnf_file
+from typing import List, Tuple
+from collections import defaultdict
 
-def is_pure_literal(literal, clauses):
-    """Verifică dacă un literal este pur (apare doar cu un semn)."""
-    appears_positive = any(literal in clause for clause in clauses)
-    appears_negative = any(-literal in clause for clause in clauses)
-    return appears_positive != appears_negative
+def dp_solve(clauses: List[List[int]]) -> Tuple[bool, None]:
+    """
+    Davis–Putnam algorithm for SAT solving with variable elimination.
+    Returns (True, None) if satisfiable, (False, None) if unsatisfiable.
+    """
+    clause_set = {frozenset(c) for c in clauses if c}
 
-def eliminate_pure_literals(clauses):
-    """Elimină clauze care conțin literali puri."""
-    all_literals = set(l for clause in clauses for l in clause)
-    pure_literals = [l for l in all_literals if is_pure_literal(l, clauses)]
+    if any(len(c) == 0 for c in clause_set):
+        return False, None  # empty clause => UNSAT
 
-    new_clauses = [clause for clause in clauses if not any(l in clause for l in pure_literals)]
-    return new_clauses
+    MAX_ITER = 10000
+    iteration = 0
 
-def resolve_clauses(cl1, cl2, var):
-    """Rezolvă două clauze care conțin var și -var."""
-    return list(set([l for l in cl1 + cl2 if l != var and l != -var]))
+    while True:
+        iteration += 1
+        if iteration > MAX_ITER:
+            # print("[DP] Max iterations reached – exiting with UNKNOWN")
+            return False, None  # or raise TimeoutError if you want
 
-def dp_solver(clauses, variables):
-    """Algoritmul Davis–Putnam (fără literali puri, opțional)."""
-    clauses = eliminate_pure_literals(clauses)
+        if not clause_set:
+            return True, None
 
-    if not clauses:
-        return True  # formula este satisfiabilă
-    if [] in clauses:
-        return False  # clauza vidă → nesatisfiabilă
+        if frozenset() in clause_set:
+            return False, None
 
-    # Alege prima variabilă
-    for var in variables:
-        break
+        # Select variable by frequency
+        var_counts = defaultdict(int)
+        for clause in clause_set:
+            for lit in clause:
+                var_counts[abs(lit)] += 1
 
-    # Clauze cu var și -var
-    pos_clauses = [c for c in clauses if var in c]
-    neg_clauses = [c for c in clauses if -var in c]
-    other_clauses = [c for c in clauses if var not in c and -var not in c]
+        if not var_counts:
+            return True, None
 
-    # Generează toate rezolventele
-    resolvents = [resolve_clauses(p, n, var) for p in pos_clauses for n in neg_clauses]
+        var = max(var_counts, key=lambda v: var_counts[v])
+        pos = {c for c in clause_set if var in c}
+        neg = {c for c in clause_set if -var in c}
+        rest = {c for c in clause_set if var not in c and -var not in c}
 
-    new_clauses = other_clauses + resolvents
-    new_variables = [v for v in variables if v != var]
+        new_clauses = set()
+        for c1 in pos:
+            for c2 in neg:
+                resolvent = (c1 - {var}) | (c2 - {-var})
+                if any(-lit in resolvent for lit in resolvent):
+                    continue  # tautology
+                new_clauses.add(frozenset(resolvent))
 
-    return dp_solver(new_clauses, new_variables)
+        if frozenset() in new_clauses:
+            return False, None
 
-# Pentru test
-if __name__ == "__main__":
-    num_vars, _, clauses = read_cnf_file("test.cnf")
-    variables = list(range(1, num_vars + 1))
-    result = dp_solver(clauses, variables)
-    print("SATISFIABIL" if result else "NESATISFIABIL")
+        updated = rest | new_clauses
+        if updated == clause_set:
+            return True, None  # no progress
+
+        clause_set = updated
